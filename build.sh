@@ -48,3 +48,4 @@ echo "Building..."
 make
 
 echo "Done. Plugin is at build/libvideo_vcam_plugin.dylib"
+

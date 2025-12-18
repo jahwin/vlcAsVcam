@@ -3,247 +3,209 @@
 #endif
 
 #include <vlc_common.h>
-#include <vlc_plugin.h>
-#include <vlc_interface.h>
-#include <cstdio>
-#include <cstring>
-#include <cstdlib>
-#include <new>
-
 #include <vlc_filter.h>
 #include <vlc_picture.h>
+#include <vlc_plugin.h>
 
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <cerrno>
-#include <inttypes.h>
+#include "ndi_minimal.h"
+#include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <dlfcn.h>
+#include <new>
 
-// Some tooling/language-servers may not see the build-system -DMODULE_STRING,
-// but VLC's plugin macros require it. The actual build still defines it.
 #ifndef MODULE_STRING
 #define MODULE_STRING "video_vcam"
 #endif
 
-/*
- * This plugin implements a basic VLC interface module.
- * It is a C++ project that builds into a .dylib.
- */
-
-// Interface module callbacks
+// Forward decls
 static int IntfOpen(vlc_object_t *);
 static void IntfClose(vlc_object_t *);
-
-// Video filter submodule callbacks
 static int VideoTapOpen(vlc_object_t *);
 static picture_t *VideoTapFilter(filter_t *, picture_t *);
 static void VideoTapClose(vlc_object_t *);
 
-// Define the module
-vlc_module_begin()
-    set_shortname("VCam")
-        set_description("VCam Plugin for VLC - Adds Start VCam capability")
-            set_capability("interface", 0)
-    // set_category(CAT_INTERFACE) - Not needed/available in 3.0?
-    set_subcategory(SUBCAT_INTERFACE_GENERAL)
-        set_callbacks(IntfOpen, IntfClose)
-            add_shortcut("vcam")
+// Module definition
+vlc_module_begin() set_shortname("VCamNDI") set_description("VLC NDI Output")
+    set_capability("interface", 0) set_subcategory(SUBCAT_INTERFACE_GENERAL)
+        set_callbacks(IntfOpen, IntfClose) add_shortcut("vcam")
 
-                add_submodule()
-                    set_shortname("VCamTap")
-                        set_description("VCam video tap (exports rendered frames)")
-                            set_capability("video filter", 0)
-                                set_callbacks(VideoTapOpen, VideoTapClose)
-                                    add_shortcut("vcam-tap")
-                                        vlc_module_end()
+            add_submodule() set_shortname("NDITap")
+                set_description("NDI Video Output Filter")
+                    set_capability("video filter", 0)
+                        set_callbacks(VideoTapOpen, VideoTapClose)
+                            add_shortcut("vcam-tap") vlc_module_end()
 
-    // -----------------------------
-    // Interface module
-    // -----------------------------
-    static int IntfOpen(vlc_object_t *p_this)
-{
-    (void)p_this;
-    // Minimal plugin: prove load/activation without relying on VLC internal symbols
-    // that differ between VLC builds on macOS.
-    std::fprintf(stderr, "[VCam] Open called (plugin loaded)\n");
-
-    return VLC_SUCCESS;
-}
-
-static void IntfClose(vlc_object_t *p_this)
-{
-    (void)p_this;
-    std::fprintf(stderr, "[VCam] Close called (plugin unloaded)\n");
-}
-
-// -----------------------------
-// Video tap filter submodule
-// -----------------------------
-
-struct filter_sys_t
-{
-    int fd = -1;
-    uint64_t frames_seen = 0;
-    uint64_t frames_sent = 0;
+    // Internal System
+    struct filter_sys_t {
+  NDIlib_send_instance_t p_ndi_send;
+  int width;
+  int height;
 };
 
-static const uint32_t VCAM_MAGIC = 0x5643414d; // 'VCAM'
-static const uint32_t VCAM_VERSION = 1;
+// Global NDI Init
+static bool ndi_initialized = false;
 
-struct vcam_frame_header
-{
-    uint32_t magic;
-    uint32_t version;
-    uint32_t width;
-    uint32_t height;
-    uint32_t chroma; // vlc_fourcc_t
-    uint32_t planes;
-    uint64_t pts; // picture timestamp (if available)
-    uint32_t pitches[4];
-    uint32_t lines[4];
-};
-
-static bool write_all_blocking(int fd, const void *buf, size_t len)
-{
-    const uint8_t *p = static_cast<const uint8_t *>(buf);
-    size_t off = 0;
-    while (off < len)
-    {
-        ssize_t n = ::write(fd, p + off, len - off);
-        if (n > 0)
-        {
-            off += static_cast<size_t>(n);
-            continue;
-        }
-        if (n == 0)
-            return false;
-        if (errno == EINTR)
-            continue;
-        return false;
-    }
-    return true;
+extern "C" {
+bool NDIlib_initialize(void);
+NDIlib_send_instance_t
+NDIlib_send_create(const NDIlib_send_create_t *p_create_settings);
+void NDIlib_send_destroy(NDIlib_send_instance_t p_instance);
+void NDIlib_send_send_video_v2(NDIlib_send_instance_t p_instance,
+                               const NDIlib_video_frame_v2_t *p_video_data);
 }
 
-static int VideoTapOpen(vlc_object_t *obj)
-{
-    filter_t *filter = (filter_t *)obj;
-    // Pass-through: output format equals input format.
-    filter->fmt_out = filter->fmt_in;
-
-    auto *sys = new (std::nothrow) filter_sys_t();
-    if (!sys)
-        return VLC_ENOMEM;
-
-    const char *sock_path = ::getenv("VLC_VCAM_SOCKET");
-    if (!sock_path || !*sock_path)
-    {
-        sock_path = "/tmp/vlc_vcam.sock";
-    }
-
-    sys->fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
-    if (sys->fd < 0)
-    {
-        delete sys;
-        return VLC_EGENERIC;
-    }
-
-    sockaddr_un addr{};
-    std::memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    std::snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", sock_path);
-
-    if (::connect(sys->fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0)
-    {
-        // No receiver running yet. Keep the filter alive but disable sending.
-        ::close(sys->fd);
-        sys->fd = -1;
-        std::fprintf(stderr, "[VCamTap] enabled but NOT connected (start receiver first). socket=%s\n", sock_path);
-    }
-    else
-    {
-        // Blocking stream: simplest and reliable for now.
-        // (We can add a ring-buffer/shared-memory later for performance.)
-        std::fprintf(stderr, "[VCamTap] enabled, streaming frames to %s\n", sock_path);
-    }
-
-    filter->p_sys = sys;
-
-    // VLC 3.0.x filter API: set the callback directly
-    filter->pf_video_filter = VideoTapFilter;
-
-    return VLC_SUCCESS;
+static int IntfOpen(vlc_object_t *p_this) {
+  fprintf(stderr, "[VCam] Interface Loaded\n");
+  return VLC_SUCCESS;
 }
 
-static picture_t *VideoTapFilter(filter_t *filter, picture_t *pic)
-{
-    auto *sys = filter->p_sys;
-    if (!sys || sys->fd < 0 || !pic)
-        return pic;
+static void IntfClose(vlc_object_t *p_this) { (void)p_this; }
 
-    sys->frames_seen++;
-    if (sys->frames_seen <= 5)
-        std::fprintf(stderr, "[VCamTap] filter called (frame=%" PRIu64 ")\n", sys->frames_seen);
+static int VideoTapOpen(vlc_object_t *obj) {
+  filter_t *filter = (filter_t *)obj;
+  filter->fmt_out = filter->fmt_in;
 
-    vcam_frame_header hdr{};
-    hdr.magic = VCAM_MAGIC;
-    hdr.version = VCAM_VERSION;
-    hdr.width = static_cast<uint32_t>(filter->fmt_in.video.i_visible_width);
-    hdr.height = static_cast<uint32_t>(filter->fmt_in.video.i_visible_height);
-    hdr.chroma = static_cast<uint32_t>(filter->fmt_in.video.i_chroma);
-    hdr.planes = static_cast<uint32_t>(pic->i_planes);
-    hdr.pts = static_cast<uint64_t>(pic->date);
+  fprintf(stderr, "[VCamTap] VideoTapOpen called. Input chroma: %4.4s\n",
+          (const char *)&filter->fmt_in.video.i_chroma);
 
-    const int max_planes = (pic->i_planes > 4) ? 4 : pic->i_planes;
-    for (int i = 0; i < max_planes; i++)
-    {
-        hdr.pitches[i] = static_cast<uint32_t>(pic->p[i].i_pitch);
-        hdr.lines[i] = static_cast<uint32_t>(pic->p[i].i_lines);
+  if (!ndi_initialized) {
+    fprintf(stderr, "[VCamTap] Initializing NDIlib...\n");
+    if (!NDIlib_initialize()) {
+      fprintf(stderr, "[VCamTap] NDIlib_initialize returned false!\n");
+      return VLC_EGENERIC;
     }
+    ndi_initialized = true;
+    fprintf(stderr, "[VCamTap] NDIlib initialized successfully.\n");
+  }
 
-    // Stream: header then plane bytes.
-    if (!write_all_blocking(sys->fd, &hdr, sizeof(hdr)))
-    {
-        std::fprintf(stderr, "[VCamTap] write failed (header) errno=%d\n", errno);
-        if (errno == EPIPE)
-        {
-            ::close(sys->fd);
-            sys->fd = -1;
-        }
-        return pic;
-    }
+  auto *sys = new (std::nothrow) filter_sys_t();
+  if (!sys)
+    return VLC_ENOMEM;
 
-    for (int i = 0; i < max_planes; i++)
-    {
-        const size_t len = static_cast<size_t>(pic->p[i].i_pitch) * static_cast<size_t>(pic->p[i].i_lines);
-        if (!write_all_blocking(sys->fd, pic->p[i].p_pixels, len))
-        {
-            std::fprintf(stderr, "[VCamTap] write failed (plane=%d) errno=%d\n", i, errno);
-            if (errno == EPIPE)
-            {
-                ::close(sys->fd);
-                sys->fd = -1;
-            }
-            return pic;
-        }
-    }
+  NDIlib_send_create_t create_settings;
+  create_settings.p_ndi_name = "VLC Output";
+  create_settings.p_groups = NULL;
+  create_settings.clock_video = true;
+  create_settings.clock_audio = false;
 
-    sys->frames_sent++;
-    if (sys->frames_sent <= 5)
-        std::fprintf(stderr, "[VCamTap] sent frame=%" PRIu64 "\n", sys->frames_sent);
+  fprintf(stderr, "[VCamTap] Creating NDI sender...\n");
+  sys->p_ndi_send = NDIlib_send_create(&create_settings);
+  if (!sys->p_ndi_send) {
+    fprintf(stderr, "[VCamTap] NDIlib_send_create failed!\n");
+    delete sys;
+    return VLC_EGENERIC;
+  }
+
+  sys->width = filter->fmt_in.video.i_visible_width;
+  sys->height = filter->fmt_in.video.i_visible_height;
+
+  filter->p_sys = sys;
+  filter->pf_video_filter = VideoTapFilter;
+
+  fprintf(stderr, "[VCamTap] NDI Sender started: 'VLC Output' %dx%d\n",
+          sys->width, sys->height);
+
+  return VLC_SUCCESS;
+}
+
+static picture_t *VideoTapFilter(filter_t *filter, picture_t *pic) {
+  auto *sys = filter->p_sys;
+  if (!sys || !sys->p_ndi_send || !pic)
     return pic;
+
+  // Validate Chroma
+  if (filter->fmt_in.video.i_chroma != VLC_CODEC_I420 &&
+      filter->fmt_in.video.i_chroma != VLC_CODEC_YV12) {
+    static bool warned = false;
+    if (!warned) {
+      fprintf(stderr,
+              "[VCamTap] Unsupported chroma for NDI: %4.4s. Expected I420.\n",
+              (const char *)&filter->fmt_in.video.i_chroma);
+      warned = true;
+    }
+    return pic;
+  }
+
+  // Setup NDI Frame
+  NDIlib_video_frame_v2_t NDI_video_frame;
+  memset(&NDI_video_frame, 0, sizeof(NDIlib_video_frame_v2_t));
+
+  NDI_video_frame.xres = filter->fmt_in.video.i_visible_width;
+  NDI_video_frame.yres = filter->fmt_in.video.i_visible_height;
+  NDI_video_frame.frame_format_type = NDIlib_frame_format_type_progressive;
+  NDI_video_frame.picture_aspect_ratio =
+      (float)NDI_video_frame.xres / (float)NDI_video_frame.yres;
+  NDI_video_frame.frame_rate_N = filter->fmt_in.video.i_frame_rate;
+  NDI_video_frame.frame_rate_D = filter->fmt_in.video.i_frame_rate_base;
+  NDI_video_frame.timecode = pic->date * 10;
+
+  // Using I420 (Corrected FourCC in header now)
+  NDI_video_frame.FourCC = NDIlib_FourCC_video_type_I420;
+
+  // Copy Buffer (Planar I420)
+  static uint8_t *temp_buffer = NULL;
+  static size_t temp_size = 0;
+
+  // I420 size: W*H + (W/2*H/2)*2 = W*H * 1.5
+  size_t required = NDI_video_frame.xres * NDI_video_frame.yres * 3 / 2;
+
+  if (temp_size < required) {
+    free(temp_buffer);
+    temp_buffer = (uint8_t *)malloc(required);
+    temp_size = required;
+  }
+
+  uint8_t *dst = temp_buffer;
+
+  // Copy Y Plane
+  for (int i = 0; i < NDI_video_frame.yres; i++) {
+    memcpy(dst + i * NDI_video_frame.xres,
+           pic->p[0].p_pixels + i * pic->p[0].i_pitch, NDI_video_frame.xres);
+  }
+
+  int uv_h = NDI_video_frame.yres / 2;
+  int uv_w = NDI_video_frame.xres / 2;
+
+  // Copy U Plane
+  uint8_t *u_dst = dst + (NDI_video_frame.xres * NDI_video_frame.yres);
+  for (int i = 0; i < uv_h; i++) {
+    memcpy(u_dst + i * uv_w, pic->p[1].p_pixels + i * pic->p[1].i_pitch, uv_w);
+  }
+
+  // Copy V Plane
+  uint8_t *v_dst = u_dst + (uv_w * uv_h);
+  for (int i = 0; i < uv_h; i++) {
+    memcpy(v_dst + i * uv_w, pic->p[2].p_pixels + i * pic->p[2].i_pitch, uv_w);
+  }
+
+  NDI_video_frame.p_data = temp_buffer;
+  NDI_video_frame.line_stride_in_bytes =
+      NDI_video_frame.xres; // Stride is width for Y plane
+
+  NDIlib_send_send_video_v2(sys->p_ndi_send, &NDI_video_frame);
+
+  // Logging
+  static int frame_count = 0;
+  frame_count++;
+  if (frame_count % 60 == 0) {
+    fprintf(stderr, "[VCamTap] Sent Frame %d (I420). Res: %dx%d\n", frame_count,
+            NDI_video_frame.xres, NDI_video_frame.yres);
+  }
+
+  return pic;
 }
 
-static void VideoTapClose(vlc_object_t *obj)
-{
-    filter_t *filter = (filter_t *)obj;
-    auto *sys = filter->p_sys;
-    if (sys)
-    {
-        if (sys->fd >= 0)
-            ::close(sys->fd);
-        delete sys;
-        filter->p_sys = NULL;
+static void VideoTapClose(vlc_object_t *obj) {
+  filter_t *filter = (filter_t *)obj;
+  auto *sys = filter->p_sys;
+  if (sys) {
+    if (sys->p_ndi_send) {
+      NDIlib_send_destroy(sys->p_ndi_send);
     }
-    std::fprintf(stderr, "[VCamTap] disabled\n");
+    delete sys;
+    filter->p_sys = NULL;
+  }
+  fprintf(stderr, "[VCamTap] NDI Sender stopped\n");
 }

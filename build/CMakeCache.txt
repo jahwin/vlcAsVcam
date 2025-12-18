@@ -195,6 +195,9 @@ CMAKE_TAPI:FILEPATH=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeD
 // Studio IDE projects all commands are done without /nologo.
 CMAKE_VERBOSE_MAKEFILE:BOOL=FALSE
 
+//Path to a library.
+NDI_LIB:FILEPATH=/Library/CoreMediaIO/Plug-Ins/DAL/NDIVideoOut.plugin/Contents/Frameworks/libndi.dylib
+
 //Arguments to supply to pkg-config
 PKG_CONFIG_ARGN:STRING=
 
@@ -206,6 +209,9 @@ video_vcam_plugin_BINARY_DIR:STATIC=/Applications/www/jahwin/vlcVcam/build
 
 //Value Computed by CMake
 video_vcam_plugin_IS_TOP_LEVEL:STATIC=ON
+
+//Dependencies for the target
+video_vcam_plugin_LIB_DEPENDS:STATIC=general;/Library/CoreMediaIO/Plug-Ins/DAL/NDIVideoOut.plugin/Contents/Frameworks/libndi.dylib;
 
 //Value Computed by CMake
 video_vcam_plugin_SOURCE_DIR:STATIC=/Applications/www/jahwin/vlcVcam

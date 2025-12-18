@@ -92,6 +92,7 @@ video_vcam_plugin_EXTERNAL_OBJECTS =
 
 libvideo_vcam_plugin.dylib: CMakeFiles/video_vcam_plugin.dir/src/vcam_plugin.cpp.o
 libvideo_vcam_plugin.dylib: CMakeFiles/video_vcam_plugin.dir/build.make
+libvideo_vcam_plugin.dylib: /Library/CoreMediaIO/Plug-Ins/DAL/NDIVideoOut.plugin/Contents/Frameworks/libndi.dylib
 libvideo_vcam_plugin.dylib: CMakeFiles/video_vcam_plugin.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/Applications/www/jahwin/vlcVcam/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Linking CXX shared module libvideo_vcam_plugin.dylib"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/video_vcam_plugin.dir/link.txt --verbose=$(VERBOSE)
