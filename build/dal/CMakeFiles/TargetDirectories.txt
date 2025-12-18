@@ -1,3 +1,0 @@
-/Applications/www/jahwin/vlcVcam/build/dal/CMakeFiles/VLCVCamDAL.dir
-/Applications/www/jahwin/vlcVcam/build/dal/CMakeFiles/edit_cache.dir
-/Applications/www/jahwin/vlcVcam/build/dal/CMakeFiles/rebuild_cache.dir
