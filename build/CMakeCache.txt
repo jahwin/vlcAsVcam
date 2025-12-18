@@ -201,9 +201,6 @@ PKG_CONFIG_ARGN:STRING=
 //pkg-config executable
 PKG_CONFIG_EXECUTABLE:FILEPATH=/opt/homebrew/bin/pkg-config
 
-//No help, variable specified on the command line.
-VLC_INCLUDE_DIR:UNINITIALIZED=/Applications/www/jahwin/vlcVcam/vlc_sdk/include
-
 //Value Computed by CMake
 video_vcam_plugin_BINARY_DIR:STATIC=/Applications/www/jahwin/vlcVcam/build
 

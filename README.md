@@ -64,6 +64,35 @@ mkdir -p ~/Library/Application\ Support/org.videolan.vlc/lua/extensions/
 cp lua/extensions/VCam.lua ~/Library/Application\ Support/org.videolan.vlc/lua/extensions/
 ```
 
+## Capturing what VLC renders (Video Tap)
+
+This project also contains a **video filter submodule** named `vcam-tap` that receives the
+same `picture_t*` frames VLC is rendering (post-decoding, and after other filters in the chain).
+
+### Enable the tap
+
+Run VLC with:
+
+```bash
+export VLC_PLUGIN_PATH=~/Library/Application\ Support/org.videolan.vlc/plugins
+export VLC_VCAM_SOCKET=/tmp/vlc_vcam.sock
+/Applications/VLC.app/Contents/MacOS/VLC --video-filter=vcam-tap
+```
+
+The filter sends each frame as a UNIX datagram to `VLC_VCAM_SOCKET` (default `/tmp/vlc_vcam.sock`).
+
+### Receive frames (debug)
+
+In another terminal:
+
+```bash
+python3 tools/vcam_receiver.py
+```
+
+This prints frame metadata and payload size. Next step is to connect this receiver to your
+third-party virtual camera system (tell me which one you want to target: OBS Virtual Camera,
+CoreMediaIO DAL, Syphon/NDI, etc.).
+
 2.  Cache generation:
     Sometimes you need to reset the VLC plugin cache:
     ```bash

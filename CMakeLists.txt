@@ -17,14 +17,19 @@ endif()
 # Fallback: User can provide VLC_INCLUDE_DIR
 if(NOT VLC_PLUGIN_FOUND)
     if(NOT VLC_INCLUDE_DIR)
-        message(WARNING "VLC plugin headers not found. Please set VLC_INCLUDE_DIR or install vlc-plugin headers.")
-        # Attempt to guess typical Mac locations (e.g. if installed via brew)
-        set(POSSIBLE_VLC_PATHS
-            "/opt/homebrew/include"
-            "/usr/local/include"
-            "/Applications/VLC.app/Contents/MacOS/include"
-        )
-        find_path(VLC_INCLUDE_DIR vlc_common.h PATHS ${POSSIBLE_VLC_PATHS} PATH_SUFFIXES vlc/plugins vlc)
+        # Prefer the local pinned VLC 3.0.16 headers (matches VLC 3.0.16 Vetinari).
+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vlc_sdk_3_0_16/include/vlc_plugin.h")
+            set(VLC_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vlc_sdk_3_0_16/include")
+        else()
+            message(WARNING "VLC plugin headers not found. Please set VLC_INCLUDE_DIR or install vlc-plugin headers.")
+            # Attempt to guess typical Mac locations (e.g. if installed via brew)
+            set(POSSIBLE_VLC_PATHS
+                "/opt/homebrew/include"
+                "/usr/local/include"
+                "/Applications/VLC.app/Contents/MacOS/include"
+            )
+            find_path(VLC_INCLUDE_DIR vlc_common.h PATHS ${POSSIBLE_VLC_PATHS} PATH_SUFFIXES vlc/plugins vlc)
+        endif()
     endif()
 endif()
 
