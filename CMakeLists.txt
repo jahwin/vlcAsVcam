@@ -45,8 +45,7 @@ add_definitions(-DMODULE_STRING="video_vcam")
 add_definitions(-Drestrict=__restrict)
 
 # macOS specific: VLC plugins are dynamic libraries (modules)
-# Use Objective-C++ so we can interact with Cocoa menus.
-add_library(video_vcam_plugin MODULE src/vcam_plugin.mm)
+add_library(video_vcam_plugin MODULE src/vcam_plugin.cpp)
 
 # Remove the "lib" prefix automatically added by CMake, because VLC plugins usually have specific naming.
 # But user requested "libvideo_vcam_plugin.dylib".
@@ -66,13 +65,5 @@ if(APPLE)
     set_target_properties(video_vcam_plugin PROPERTIES
         LINK_FLAGS "-undefined dynamic_lookup"
     )
-
-    # Link Cocoa for menu integration.
-    find_library(COCOA_LIBRARY Cocoa)
-    if(COCOA_LIBRARY)
-        target_link_libraries(video_vcam_plugin PRIVATE "${COCOA_LIBRARY}")
-    else()
-        message(WARNING "Cocoa framework not found; menu integration will fail to link.")
-    endif()
 endif()
 

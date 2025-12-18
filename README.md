@@ -51,6 +51,19 @@ You have two options:
     cp build/libvideo_vcam_plugin.dylib ~/Library/Application\ Support/org.videolan.vlc/plugins/
     ```
 
+## VLC Menu (Official VLC API)
+
+VLC does not expose a public C/C++ plugin API to inject items into the native macOS menu bar.
+The official way to add a clickable menu entry is a **VLC Lua Extension**, which appears under:
+**VLC → Extensions → VCam → Start VCam**.
+
+Install the extension:
+
+```bash
+mkdir -p ~/Library/Application\ Support/org.videolan.vlc/lua/extensions/
+cp lua/extensions/VCam.lua ~/Library/Application\ Support/org.videolan.vlc/lua/extensions/
+```
+
 2.  Cache generation:
     Sometimes you need to reset the VLC plugin cache:
     ```bash
