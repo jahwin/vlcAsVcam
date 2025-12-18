@@ -1,111 +1,89 @@
-# VLC VCam Plugin
+# VLC NDI Output Plugin for macOS
 
-This project builds a VLC interface plugin that adds a "Start VCam" capability (currently simulated via logs).
+## 📖 What is this?
+This is a **plugin for VLC Media Player** on macOS.
+It allows VLC to send its video stream directly to **NDI** (Network Device Interface).
 
-## Prerequisites
+**Why use this?**
+- To send video from VLC to **OBS**, **vMix**, or **Resolume** on the same network.
+- To use VLC as a source for other NDI-enabled tools.
 
-To build a VLC plugin, you need the **VLC Plugin Headers**.
-**Note:** The headers included in `VLC.app` are for *embedding* VLC (LibVLC), not for *extending* it (Plugins). You cannot build this plugin with just the VLC application installed.
+---
 
-You have two options:
-1.  **Install VLC development headers** (via Homebrew or MacPorts if available/supported).
-2.  **Use the VLC Source Code** (Recommended for macOS).
+## ⚠️ Important Compatibility Notes
+Before you start, make sure you meet the requirements:
+*   **Computer**: macOS with **Apple Silicon** (M1/M2/M3 chips).
+    *   *Note: It will not work on Intel Macs without recompiling.*
+*   **VLC Version**: **VLC 3.0.x** (Standard version).
+    *   *Note: It does not work with VLC 4.0.*
+*   **Software**: You must have [NDI Tools](https://ndi.video/tools/) installed.
 
-### Option 2: Using VLC Source Code
+---
 
-1.  Clone the VLC repository:
-    ```bash
-    git clone https://code.videolan.org/videolan/vlc.git
-    cd vlc
-    ```
-2.  You may need to run `./configure` to generate `config.h` and other necessary files.
-    ```bash
-    ./bootstrap
-    ./configure --disable-libvlc --disable-nls
-    ```
-    (You might need dependencies installed via brew).
+## 🛠 How to Build
 
-3.  Export the include directory:
-    ```bash
-    export VLC_INCLUDE_DIR=/path/to/vlc/include
-    ```
+If you want to compile the plugin yourself (e.g., if you changed the code):
 
-## Building
-
-1.  Run the build script:
+1.  **Open Terminal** in this folder.
+2.  Run the build script:
     ```bash
     ./build.sh
     ```
-    Or manually:
-    ```bash
-    mkdir build && cd build
-    cmake .. -DVLC_INCLUDE_DIR=/path/to/vlc/include
-    make
-    ```
+3.  The new plugin will appear in the `build/` folder as `libvideo_vcam_plugin.dylib`.
 
-## Installation
+---
 
-1.  Copy the generated `libvideo_vcam_plugin.dylib` to your user plugins folder:
-    ```bash
-    mkdir -p ~/Library/Application\ Support/org.videolan.vlc/plugins/
-    cp build/libvideo_vcam_plugin.dylib ~/Library/Application\ Support/org.videolan.vlc/plugins/
-    ```
+## 💾 How to Install
 
-## VLC Menu (Official VLC API)
+To install the plugin so VLC uses it automatically:
 
-VLC does not expose a public C/C++ plugin API to inject items into the native macOS menu bar.
-The official way to add a clickable menu entry is a **VLC Lua Extension**, which appears under:
-**VLC → Extensions → VCam → Start VCam**.
+### 1. Copy the Plugin
+Copy the file `build/libvideo_vcam_plugin.dylib` to this folder:
+```text
+/Applications/VLC.app/Contents/MacOS/plugins/
+```
+*(You may need Administrator permission/password to paste here).*
 
-Install the extension:
+### 2. Unblock Security (Quarantine)
+macOS will block the plugin by default because it wasn't downloaded from the App Store. You must unblock it using the Terminal:
 
 ```bash
-mkdir -p ~/Library/Application\ Support/org.videolan.vlc/lua/extensions/
-cp lua/extensions/VCam.lua ~/Library/Application\ Support/org.videolan.vlc/lua/extensions/
+xattr -d com.apple.quarantine /Applications/VLC.app/Contents/MacOS/plugins/libvideo_vcam_plugin.dylib
 ```
+*If you see "No such xattr", that's good! It means it's already unblocked.*
 
-## Capturing what VLC renders (Video Tap)
+---
 
-This project also contains a **video filter submodule** named `vcam-tap` that receives the
-same `picture_t*` frames VLC is rendering (post-decoding, and after other filters in the chain).
+## ⚙️ How to Configure VLC (Crucial Steps!)
 
-### Enable the tap
+For the plugin to work, you **MUST** change these settings in VLC:
 
-Run VLC with:
+### 1. Disable Hardware Acceleration
+NDI needs "raw" video data, but hardware acceleration hides it.
+1.  Open **VLC Preferences** (Cmd + ,).
+2.  Go to **Input / Codecs**.
+3.  Find **Hardware-accelerated decoding**.
+4.  Set it to **Disable**.
+5.  Click **Save**.
 
-```bash
-export VLC_PLUGIN_PATH=~/Library/Application\ Support/org.videolan.vlc/plugins
-export VLC_VCAM_SOCKET=/tmp/vlc_vcam.sock
-/Applications/VLC.app/Contents/MacOS/VLC --video-filter=vcam-tap
-```
+### 2. Enable the NDI Filter
+Tell VLC to use our plugin.
+1.  Open **VLC Preferences**.
+2.  Click **Show All** (Button in the bottom-left corner).
+3.  In the left list, scroll down to **Video** -> **Filters**.
+4.  On the right side, verify the checkbox **NDI Video Output Filter** (or "VCamNDI") is **CHECKED**.
+5.  Click **Save**.
 
-The filter sends each frame as a UNIX datagram to `VLC_VCAM_SOCKET` (default `/tmp/vlc_vcam.sock`).
+### 3. Restart VLC
+Quit VLC completely (Cmd + Q) and open it again. Play a video. You should now see it as a source in your NDI Monitor! 
 
-### Receive frames (debug)
+---
 
-In another terminal:
+## 🐛 Troubleshooting
 
-```bash
-python3 tools/vcam_receiver.py
-```
+*   **"I see the NDI source, but the screen is black!"**
+    *   Did you disable Hardware Acceleration? (See Step 1 above).
+    *   Are you on an M1/M2 Mac? (This plugin is built for Apple Silicon).
 
-This prints frame metadata and payload size. Next step is to connect this receiver to your
-third-party virtual camera system (tell me which one you want to target: OBS Virtual Camera,
-CoreMediaIO DAL, Syphon/NDI, etc.).
-
-2.  Cache generation:
-    Sometimes you need to reset the VLC plugin cache:
-    ```bash
-    /Applications/VLC.app/Contents/MacOS/VLC --reset-plugins-cache
-    ```
-
-## Usage
-
-1.  Open VLC.
-2.  Open the Messages window (Window -> Messages) and set verbosity to 2 (Debug).
-3.  Search for "VCam".
-4.  You can force the interface to start via command line:
-    ```bash
-    /Applications/VLC.app/Contents/MacOS/VLC --intf vcam
-    ```
-    Or check if it appears in the Interface settings.
+*   **"VLC crashes when I enable the filter."**
+    *   Make sure you have NDI Tools installed. The plugin needs the NDI library to run.
