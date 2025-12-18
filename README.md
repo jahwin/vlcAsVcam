@@ -87,3 +87,9 @@ Quit VLC completely (Cmd + Q) and open it again. Play a video. You should now se
 
 *   **"VLC crashes when I enable the filter."**
     *   Make sure you have NDI Tools installed. The plugin needs the NDI library to run.
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
